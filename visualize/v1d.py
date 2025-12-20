@@ -165,86 +165,27 @@ def v1d():
         palette = selected_palette.get()
         try:
             if palette == "Радужный градиент":
-                cycle = max(int(rainbow_cycle.get()), 2)
+                cycle = max(int(rainbow_cycle.get() or 2), 2)  # Fallback если пусто
                 ratio = (value % cycle) / cycle
                 hue = ratio * 360
                 return hsv_to_rgb(hue)
             elif palette == "Mod N":
-                n = max(int(mod_n.get()), 2)
+                n = max(int(mod_n.get() or 2), 2)  # Fallback если пусто
                 intensity = int(255 * ((value % n) / (n - 1)))
                 return f"#{intensity:02x}{intensity:02x}{intensity:02x}"
         except ValueError:
-            messagebox.showerror("Ошибка", "Некорректное значение для Mod N или цикла радуги")
-            return "#CCCCCC"
-
-    def draw_columns(data):
-        if not data:
-            return
-        canvas.delete("all")
-        w, h = canvas.winfo_width(), canvas.winfo_height()
-        if w <= 1 or h <= 1:
-            return
-        max_val = max(data)
-        num_bars = len(data)
-        bar_w = (w / num_bars) * bar_width.get()
-        spacing = bar_w * 0.2
-        total_w = num_bars * (bar_w + spacing)
-        max_height_px = (h - 50) * scale_factor.get()
-        y0_min = h - max_height_px
-        canvas.config(scrollregion=(0, y0_min, total_w, h))
-
-        for i, val in enumerate(data):
-            height = (val / max_val) * (h - 50) * scale_factor.get()
-            x0 = i * (bar_w + spacing)
-            y0 = h - height
-            x1 = x0 + bar_w
-            y1 = h
-            color = get_color(i, val)
-            canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="")
-            if bar_w > 20:
-                canvas.create_text(x0 + bar_w / 2, y0 - 15, text=str(val), font=("Arial", min(12, int(bar_w / 5))))
-
-    def draw_spiral(data):
-        if not data:
-            return
-        canvas.delete("all")
-        w, h = canvas.winfo_width(), canvas.winfo_height()
-        if w <= 1 or h <= 1:
-            return
-        center_x, center_y = w / 2, h / 2
-        max_val = max(data)
-        angle_step = 0.1 * spiral_density.get()
-        scale = scale_factor.get() * spiral_radius_factor.get()
-        num_points = len(data)
-        max_radius = min(w, h) / 2 * scale
-        points = []
-        for i in range(num_points):
-            angle = i * angle_step + math.radians(rotation.get())
-            val = data[i]
-            radius = (val / max_val) * max_radius
-            x = center_x + radius * math.cos(angle)
-            y = center_y + radius * math.sin(angle)
-            points.append((x, y))
-            if center_x - max_radius <= x <= center_x + max_radius and center_y - max_radius <= y <= center_y + max_radius:
-                color = get_color(i, val)
-                size = max(1, int(1 * scale_factor.get()))
-                canvas.create_oval(x - size, y - size, x + size, y + size, fill=color, outline=color)
-        if points:
-            for i in range(1, len(points)):
-                if abs(points[i][0] - points[i - 1][0]) < w and abs(points[i][1] - points[i - 1][1]) < h:
-                    canvas.create_line(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1], fill="#AAAAAA", smooth=True, width=1)
-        canvas.config(scrollregion=(0, 0, w, h))
+            return "#CCCCCC"  # Тихий fallback, без messagebox здесь
 
     def draw():
         try:
-            count = max(1, int(count_var.get()))
+            count = max(1, int(count_var.get() or 1500))  # Fallback если пусто
             data = load_data(count)
             if selected_vis.get() == "Столбцы":
                 draw_columns(data)
             else:
                 draw_spiral(data)
-        except ValueError:
-            messagebox.showerror("Ошибка", "Некорректное количество точек")
+        except ValueError as e:
+            messagebox.showerror("Ошибка", str(e))
 
     def export_eps():
         try:
@@ -281,7 +222,8 @@ def v1d():
     update_rainbow_visibility()
     toggle_params()
     for var in [selected_vis, selected_palette, mod_n, rainbow_cycle, scale_factor, bar_width, rotation, spiral_density, spiral_radius_factor, count_var]:
-        var.trace_add("write", lambda *_: draw())
+        var.trace_add("write", lambda *_: win.after(200, draw))  # Delay 200ms для ввода без мгновенной ошибки
+
     win.bind("<Configure>", lambda e: win.after(100, draw))
     win.bind("<MouseWheel>", lambda e: scale_factor.set(max(0.1, min(3.0, scale_factor.get() + (0.1 if e.delta > 0 else -0.1)))))
 
