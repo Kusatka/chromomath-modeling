@@ -13,8 +13,11 @@ def resource_path(relative_path):
 ICON_PATH = resource_path("icon.ico")
 DATA_PATH = resource_path("data/data.txt")
 
-# Максимум отрисовываемых точек для оптимизации памяти
-MAX_RENDER_POINTS = 150
+# Ограничение реально отрисовываемых элементов. Данные могут храниться в большем
+# объёме, но Canvas получает только выбранное пользователем подмножество.
+MIN_RENDER_POINTS = 30
+DEFAULT_RENDER_POINTS = 150
+MAX_RENDER_POINTS = 500
 
 
 def load_data():
@@ -94,19 +97,25 @@ def hsv_to_rgb(h, s=1.0, v=1.0):
     )
 
 
+def safe_int(value, default):
+    """Безопасное преобразование пользовательского значения в int."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, tk.TclError):
+        return default
+
+
 def get_color(idx, value, palette, mod_n=2, rainbow_cycle=100):
     """Получить цвет для значения в зависимости от палитры"""
     if palette == "Радужный градиент":
         # Радужный цикл зависит от номера элемента (индекса), не от значения
         # Так каждый столбец/точка получит разный оттенок с чётким периодом
-        cycle = max(int(rainbow_cycle), 2)
+        cycle = max(safe_int(rainbow_cycle, 100), 2)
         ratio = (idx % cycle) / cycle
         hue = ratio * 360
         return hsv_to_rgb(hue)
     elif palette == "Mod N":
-        n = max(int(mod_n), 2)
-        if n == 1:
-            return "#808080"
+        n = max(safe_int(mod_n, 2), 2)
         intensity = int(255 * ((value % n) / (n - 1)))
         return f"#{intensity:02x}{intensity:02x}{intensity:02x}"
     return "#CCCCCC"
@@ -172,11 +181,11 @@ def v1d():
                         padx=10, pady=10, height=15)
     
     help_content = """╔═══════════════════════════════════════════════════════════╗
-║  ХРОМОМАТЕМАТИЧЕСКОЕ МОДЕЛИРОВАНИЕ - РЕЖИМ 1D (3000³)    ║
+║  ХРОМОМАТЕМАТИЧЕСКОЕ МОДЕЛИРОВАНИЕ - РЕЖИМ 1D             ║
 ╚═══════════════════════════════════════════════════════════╝
 
 ОСНОВНАЯ ИДЕЯ:
-Последовательность n³ для n = 1..3000 визуализируется.
+Последовательность n³ визуализируется выбранным числом точек.
 Цвет показывает периодичность. Радиус/высота = математическое значение.
 
 ─────────────────────────────────────────────────────────────
@@ -185,6 +194,7 @@ def v1d():
 Формула:  height_i = (a_i / max(a)) × (H - 50) × масштаб
 • Высота ∝ n³
 • Ширина столбца регулируется
+• Количество столбцов задаётся ползунком "Количество точек"
 • Тултип: n и его куб
 
 ─────────────────────────────────────────────────────────────
@@ -196,7 +206,7 @@ def v1d():
   x = x₀ + r·cos(θ),  y = y₀ + r·sin(θ)
 
 • Угол = номер элемента (порядок)
-• Радиус = математическое значение (100³ дальше чем 10³)
+• Радиус = математическое значение среди выбранных точек
 • Пример: 100-й элемент (10^6) → дальше от центра
 • Плотность: шаг угла между точками
 • Радиус спирали: масштаб максимального радиуса
@@ -238,8 +248,8 @@ def v1d():
 ─────────────────────────────────────────────────────────────
 
 ⚙️ ОПТИМИЗАЦИЯ:
-• 3000 значений в памяти, но максимум 2000 отрисовывается
-• Плавная работа даже на слабых ПК
+• Отрисовывается только выбранное число точек
+• Перестроение выполняется по кнопке "Построить модель"
 • Тултипы при наведении: n и его куб
 • Масштаб: общий множитель для всех режимов
 
@@ -275,6 +285,9 @@ Mod N + большое N = видна структура в диапазонах
     scale_factor = tk.DoubleVar(value=1.0)
     mod_n = tk.IntVar(value=7)
     rainbow_cycle = tk.IntVar(value=100)
+    max_points_for_ui = min(MAX_RENDER_POINTS, len(data))
+    initial_points = min(DEFAULT_RENDER_POINTS, max_points_for_ui)
+    render_points = tk.DoubleVar(value=initial_points)
     
     # Столбцы
     bar_width = tk.DoubleVar(value=1.0)
@@ -341,6 +354,22 @@ Mod N + большое N = видна структура в диапазонах
     scale_slider = ttk.Scale(ctrl_frame, variable=scale_factor, from_=0.1, to=3.0,
                               orient="horizontal")
     scale_slider.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 15))
+    row += 1
+
+    # Количество элементов для отрисовки
+    ttk.Label(ctrl_frame, text="Количество точек:").grid(row=row, column=0, sticky="w")
+    points_label = ttk.Label(ctrl_frame, text=str(initial_points))
+    points_label.grid(row=row, column=1, sticky="e")
+    row += 1
+
+    points_slider = ttk.Scale(
+        ctrl_frame,
+        variable=render_points,
+        from_=min(MIN_RENDER_POINTS, max_points_for_ui),
+        to=max_points_for_ui,
+        orient="horizontal",
+    )
+    points_slider.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 15))
     row += 1
     
     # Фреймы для параметров каждого режима
@@ -421,6 +450,24 @@ Mod N + большое N = видна структура в диапазонах
     data_spiral_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 10))
     archimedes_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 10))
     exponential_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+    row += 1
+
+    build_btn = ttk.Button(
+        ctrl_frame,
+        text="Построить модель",
+        command=lambda: build_model(),
+    )
+    build_btn.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(5, 5))
+    row += 1
+
+    status_label = ttk.Label(
+        ctrl_frame,
+        text="",
+        foreground="#8A5A00",
+        wraplength=230,
+        justify="left",
+    )
+    status_label.grid(row=row, column=0, columnspan=2, sticky="ew")
     
     def show_only_params(*args):
         """Показать только параметры выбранного режима"""
@@ -449,6 +496,32 @@ Mod N + большое N = видна структура в диапазонах
             mod_frame.grid_remove()
             rainbow_frame.grid()
     
+    def get_render_count():
+        """Количество элементов, выбранное пользователем для текущей отрисовки."""
+        upper_bound = max(1, min(MAX_RENDER_POINTS, len(data)))
+        lower_bound = min(MIN_RENDER_POINTS, upper_bound)
+        return max(lower_bound, min(int(round(render_points.get())), upper_bound))
+
+    def mark_pending(*args):
+        """Пометить модель как требующую перестроения."""
+        status_label.config(text="Параметры изменены. Нажмите «Построить модель».")
+
+    def build_model():
+        """Перестроить модель по текущим параметрам."""
+        status_label.config(text="")
+        draw()
+
+    def bind_tooltip(item_id, idx, val):
+        """Привязать tooltip к объекту Canvas."""
+        def on_enter(e, v=val, i_v=idx):
+            tooltip.show(e.x_root, e.y_root, f"n = {i_v + 1}\nn³ = {v}")
+
+        def on_leave(e):
+            tooltip.hide()
+
+        canvas.tag_bind(item_id, "<Enter>", on_enter)
+        canvas.tag_bind(item_id, "<Leave>", on_leave)
+
     # === Функции отрисовки ===
     def draw_columns():
         if not data:
@@ -460,19 +533,13 @@ Mod N + большое N = видна структура в диапазонах
             return
         
         # Параметры отображения
-        num_bars = min(MAX_RENDER_POINTS, len(data))
+        num_bars = get_render_count()
         bar_w = (w / num_bars) * bar_width.get()
         spacing = bar_w * 0.2
-        total_w = len(data) * (bar_w + spacing)  # Общая ширина для всех 3000 элементов
-        
-        # Получаем текущую позицию скроллбара (0.0 до 1.0)
-        xview = canvas.xview()
-        scroll_offset = int(xview[0] * len(data))  # Индекс первого видимого элемента
-        scroll_offset = min(max(0, scroll_offset), len(data) - num_bars)
-        
-        # max_val вычисляем только для видимых элементов
-        visible_indices = range(scroll_offset, min(scroll_offset + num_bars, len(data)))
-        visible_values = [data[i] for i in visible_indices]
+        total_w = num_bars * (bar_w + spacing)
+
+        visible_indices = range(num_bars)
+        visible_values = data[:num_bars]
         max_val = max(visible_values) if visible_values else 1
         
         canvas.config(scrollregion=(0, 0, total_w, h))
@@ -492,15 +559,7 @@ Mod N + большое N = видна структура в диапазонах
                             mod_n.get(), rainbow_cycle.get())
             rect_id = canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="")
             
-            # Тултип при наведении
-            def on_enter(e, v=val, i_v=idx):
-                tooltip.show(e.x_root, e.y_root, f"n = {i_v+1}\nn³ = {v}")
-            
-            def on_leave(e):
-                tooltip.hide()
-            
-            canvas.tag_bind(rect_id, "<Enter>", on_enter)
-            canvas.tag_bind(rect_id, "<Leave>", on_leave)
+            bind_tooltip(rect_id, idx, val)
             
             if bar_w > 30:  # Показываем значение только если столбец достаточно широкий
                 canvas.create_text(x0 + bar_w / 2, y0 - 15, text=str(val),
@@ -517,14 +576,22 @@ Mod N + большое N = видна структура в диапазонах
             return
         
         center_x, center_y = w / 2, h / 2
-        max_val = max(data)
+        num_points = get_render_count()
+        visible_values = data[:num_points]
+        max_val = max(visible_values)
         
         angle_step = 0.1 * density_data.get()
         scale = scale_factor.get() * radius_data.get()
-        num_points = min(len(data), MAX_RENDER_POINTS)
         max_radius = min(w, h) / 2 * scale
         
-        canvas.config(scrollregion=(0, 0, w, h))
+        canvas.config(
+            scrollregion=(
+                center_x - max_radius - 20,
+                center_y - max_radius - 20,
+                center_x + max_radius + 20,
+                center_y + max_radius + 20,
+            )
+        )
         
         # Собираем все координаты для полилинии
         line_coords = []
@@ -532,9 +599,8 @@ Mod N + большое N = видна структура в диапазонах
         
         for i in range(num_points):
             angle = i * angle_step + math.radians(rotation_data.get())
-            val = data[i]
-            # Логарифмическое масштабирование для лучшей видимости
-            radius = (math.log(val + 1) / math.log(max_val + 1)) * max_radius
+            val = visible_values[i]
+            radius = (val / max_val) * max_radius if max_val > 0 else 0
             
             x = center_x + radius * math.cos(angle)
             y = center_y + radius * math.sin(angle)
@@ -550,9 +616,11 @@ Mod N + большое N = видна структура в диапазонах
             canvas.create_line(*line_coords, fill="#DDDDDD", width=1, smooth=False)
         
         # Рисуем точки сверху
-        for x, y, color, size in point_data:
-            canvas.create_oval(x - size, y - size, x + size, y + size,
-                                        fill=color, outline=color)
+        for idx, (x, y, color, size) in enumerate(point_data):
+            point_id = canvas.create_oval(
+                x - size, y - size, x + size, y + size, fill=color, outline=color
+            )
+            bind_tooltip(point_id, idx, visible_values[idx])
 
 
 
@@ -569,7 +637,8 @@ Mod N + большое N = видна структура в диапазонах
         
         center_x, center_y = w / 2, h / 2
         
-        num_points = min(len(data), MAX_RENDER_POINTS)
+        num_points = get_render_count()
+        visible_values = data[:num_points]
         turns = turns_archimedes.get()
         theta_max = turns * 2 * math.pi
         
@@ -577,17 +646,27 @@ Mod N + большое N = видна структура в диапазонах
         b = max_radius / theta_max if theta_max > 0 else 1
         a = max_radius * 0.05
         
-        canvas.config(scrollregion=(0, 0, w, h))
+        canvas.config(
+            scrollregion=(
+                center_x - max_radius - 20,
+                center_y - max_radius - 20,
+                center_x + max_radius + 20,
+                center_y + max_radius + 20,
+            )
+        )
         
         # Собираем координаты для полилинии
         line_coords = []
         point_data = []
         
+        denom = max(num_points - 1, 1)
+        rotation = math.radians(rotation_archimedes.get())
         for i in range(num_points):
-            theta = (i / num_points) * theta_max + math.radians(rotation_archimedes.get())
-            radius = a + b * theta
+            theta_base = (i / denom) * theta_max
+            theta = theta_base + rotation
+            radius = a + b * theta_base
             
-            val = data[i]
+            val = visible_values[i]
             x = center_x + radius * math.cos(theta)
             y = center_y + radius * math.sin(theta)
             
@@ -602,9 +681,11 @@ Mod N + большое N = видна структура в диапазонах
             canvas.create_line(*line_coords, fill="#DDDDDD", width=1, smooth=False)
         
         # Рисуем точки сверху
-        for x, y, color, size in point_data:
-            canvas.create_oval(x - size, y - size, x + size, y + size,
-                                        fill=color, outline=color)
+        for idx, (x, y, color, size) in enumerate(point_data):
+            point_id = canvas.create_oval(
+                x - size, y - size, x + size, y + size, fill=color, outline=color
+            )
+            bind_tooltip(point_id, idx, visible_values[idx])
 
 
     
@@ -620,7 +701,8 @@ Mod N + большое N = видна структура в диапазонах
         
         center_x, center_y = w / 2, h / 2
         
-        num_points = min(len(data), MAX_RENDER_POINTS)
+        num_points = get_render_count()
+        visible_values = data[:num_points]
         b = coefficient_exp.get()
         a = base_radius_exp.get()
         
@@ -628,22 +710,32 @@ Mod N + большое N = видна структура в диапазонах
         max_allowed_radius = min(w, h) / 2 * scale_factor.get()
         theta_max = math.log(max_allowed_radius / a + 0.001) / max(b, 0.001)
         
-        canvas.config(scrollregion=(0, 0, w, h))
+        canvas.config(
+            scrollregion=(
+                center_x - max_allowed_radius - 20,
+                center_y - max_allowed_radius - 20,
+                center_x + max_allowed_radius + 20,
+                center_y + max_allowed_radius + 20,
+            )
+        )
         
         # Собираем координаты для полилинии
         line_coords = []
         point_data = []
         
+        denom = max(num_points - 1, 1)
+        rotation = math.radians(rotation_exp.get())
         for i in range(num_points):
-            theta = (i / num_points) * theta_max + math.radians(rotation_exp.get())
+            theta_base = (i / denom) * theta_max
+            theta = theta_base + rotation
             
             try:
-                radius = a * math.exp(b * theta)
+                radius = a * math.exp(b * theta_base)
                 radius = min(radius, max_allowed_radius)
             except:
                 radius = max_allowed_radius
             
-            val = data[i]
+            val = visible_values[i]
             x = center_x + radius * math.cos(theta)
             y = center_y + radius * math.sin(theta)
             
@@ -658,9 +750,11 @@ Mod N + большое N = видна структура в диапазонах
             canvas.create_line(*line_coords, fill="#DDDDDD", width=1, smooth=False)
         
         # Рисуем точки сверху
-        for x, y, color, size in point_data:
-            canvas.create_oval(x - size, y - size, x + size, y + size,
-                                        fill=color, outline=color)
+        for idx, (x, y, color, size) in enumerate(point_data):
+            point_id = canvas.create_oval(
+                x - size, y - size, x + size, y + size, fill=color, outline=color
+            )
+            bind_tooltip(point_id, idx, visible_values[idx])
 
 
     
@@ -680,49 +774,62 @@ Mod N + большое N = видна структура в диапазонах
     # === Обновления UI ===
     def update_scale_label(*args):
         scale_label.config(text=f"{scale_factor.get():.2f}x")
-        draw()
+        mark_pending()
     
     def update_bar_label(*args):
         bar_label.config(text=f"{bar_width.get():.2f}x")
-        draw()
+        mark_pending()
     
     def update_rot_data_label(*args):
         rot_data_label.config(text=f"{rotation_data.get():.0f}°")
-        draw()
+        mark_pending()
     
     def update_dens_label(*args):
         dens_label.config(text=f"{density_data.get():.2f}x")
-        draw()
+        mark_pending()
     
     def update_rad_label(*args):
         rad_label.config(text=f"{radius_data.get():.2f}x")
-        draw()
+        mark_pending()
     
     def update_turns_label(*args):
         turns_label.config(text=f"{turns_archimedes.get():.1f}")
-        draw()
+        mark_pending()
     
     def update_rot_arch_label(*args):
         rot_arch_label.config(text=f"{rotation_archimedes.get():.0f}°")
-        draw()
+        mark_pending()
     
     def update_coef_label(*args):
         coef_label.config(text=f"{coefficient_exp.get():.2f}")
-        draw()
+        mark_pending()
     
     def update_base_rad_label(*args):
         base_rad_label.config(text=f"{base_radius_exp.get():.1f}")
-        draw()
+        mark_pending()
     
     def update_rot_exp_label(*args):
         rot_exp_label.config(text=f"{rotation_exp.get():.0f}°")
-        draw()
+        mark_pending()
+
+    def update_points_label(*args):
+        points_label.config(text=str(get_render_count()))
+        mark_pending()
     
     # === Привязки ===
-    selected_vis.trace_add("write", show_only_params)
-    selected_palette.trace_add("write", update_palette_visibility)
+    def on_mode_change(*args):
+        show_only_params()
+        mark_pending()
+
+    def on_palette_change(*args):
+        update_palette_visibility()
+        mark_pending()
+
+    selected_vis.trace_add("write", on_mode_change)
+    selected_palette.trace_add("write", on_palette_change)
     
     scale_factor.trace_add("write", update_scale_label)
+    render_points.trace_add("write", update_points_label)
     bar_width.trace_add("write", update_bar_label)
     rotation_data.trace_add("write", update_rot_data_label)
     density_data.trace_add("write", update_dens_label)
@@ -732,19 +839,12 @@ Mod N + большое N = видна структура в диапазонах
     coefficient_exp.trace_add("write", update_coef_label)
     base_radius_exp.trace_add("write", update_base_rad_label)
     rotation_exp.trace_add("write", update_rot_exp_label)
-    mod_n.trace_add("write", lambda *a: draw())
-    rainbow_cycle.trace_add("write", lambda *a: draw())
-    selected_palette.trace_add("write", lambda *a: draw())
+    mod_n.trace_add("write", lambda *a: mark_pending())
+    rainbow_cycle.trace_add("write", lambda *a: mark_pending())
     
     # === События окна ===
-    def on_configure(event):
-        win.after(50, draw)
-    
-    def on_canvas_configure(event):
-        win.after(50, draw)
-    
-    win.bind("<Configure>", on_configure)
-    canvas.bind("<Configure>", on_canvas_configure)
+    # Перерисовка намеренно выполняется только по кнопке "Построить модель":
+    # это убирает лаги при изменении размера окна и движении слайдеров.
     win.bind("<MouseWheel>", lambda e: scale_factor.set(
         max(0.1, min(3.0, scale_factor.get() + (0.1 if e.delta > 0 else -0.1)))
     ))
@@ -764,5 +864,5 @@ Mod N + большое N = видна структура в диапазонах
     show_only_params()
     update_palette_visibility()
     
-    win.after(100, lambda: [draw(), center_window()])
+    win.after(100, lambda: [build_model(), center_window()])
     win.deiconify()
